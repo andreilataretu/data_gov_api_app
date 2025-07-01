@@ -13,9 +13,11 @@ Aplicație pentru căutarea firmelor în fișierul financiar publicat pe [data.g
 - Cod fiscal exact **sau interval**
 - Denumire firmă (parțial)
 - Cod CAEN (exact sau parțial)
-- Județ (selectabil)
+- Județ (exact/parțial)
 
-Fișierul poate avea milioane de înregistrări — aplicația folosește procesare pe bucăți pentru eficiență.
+---
+
+Fișierul este mare, dar aplicația folosește citire în bucăți (`chunksize`) pentru eficiență.
 """)
 
 # === CONFIG
@@ -24,19 +26,6 @@ CHUNKSIZE = 50000
 
 # === INPUT FILTERS
 st.subheader("🎯 Criterii de filtrare")
-
-# === BUTON pentru afișare coloane disponibile
-st.markdown("### 🧪 Diagnostic fișier (verificare coloane)")
-if st.button("🔍 Afișează coloanele disponibile din fișier"):
-    with st.spinner("Se încarcă primele rânduri..."):
-        try:
-            test_df = pd.read_csv(CSV_URL, nrows=100)
-            st.success("✅ Fișier încărcat.")
-            st.markdown("**Coloane detectate în fișier:**")
-            st.code(", ".join(test_df.columns), language="text")
-        except Exception as e:
-            st.error(f"Eroare la încărcare: {e}")
-
 
 col1, col2, col3 = st.columns(3)
 with col1:
@@ -53,7 +42,7 @@ with col3:
 def search_csv_advanced(url, cui_exact=None, cui_min=None, cui_max=None, den=None, caen_val=None, judet_val=None):
     results = []
 
-    for chunk in pd.read_csv(url, chunksize=CHUNKSIZE, low_memory=False):
+    for chunk in pd.read_csv(url, sep=";", chunksize=CHUNKSIZE, low_memory=False):
         cols = {col.lower().strip(): col for col in chunk.columns}
         
         col_cui = next((v for k, v in cols.items() if "cod fiscal" in k or "cui" in k), None)
