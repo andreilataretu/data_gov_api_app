@@ -1,104 +1,61 @@
-import streamlit as st
 import pandas as pd
+import streamlit as st
 
-st.set_page_config(page_title="Căutare avansată firme", layout="wide")
+# Căile locale către fișiere
+CSV_PATH = "data/web_bl_bs_sl_an2023.csv"                 # legenda
+DATA_PATH = "data/web_bl_bs_sl_an2024_convertit.csv"      # datele reale
 
-st.title("🔎 Căutare avansată în Situații Financiare 2024")
-st.markdown("""
-Aplicație pentru căutarea firmelor în fișierul financiar publicat pe [data.gov.ro](https://data.gov.ro/dataset/d3caacb6-2c08-445e-94e6-8d36d00ab250/resource/b9f399d8-b641-4a23-9de7-a1dd4427b4b0/download/web_bl_bs_sl_an2024.csv)
+@st.cache_data(show_spinner="Se încarcă datele...")
+def incarca_date_si_legenda():
+    # 1) Încarcă datele reale, cu autodetectare de separator
+    df_data = pd.read_csv(DATA_PATH, sep=None, engine='python', dtype=str)
+    df_data.columns = df_data.columns.str.strip()
 
----
+    # 2) Încarcă legenda: fiecare rând "Explicație;Cod"
+    df_legend_raw = pd.read_csv(CSV_PATH, sep=";", header=None, names=["Label"], dtype=str)
+    legend_dict = {}
+    for line in df_legend_raw["Label"].dropna():
+        if ";" in line:
+            descriere, cod = line.split(";", 1)
+            legend_dict[cod.strip()] = descriere.strip()
 
-### ✅ Criterii disponibile:
-- Cod fiscal exact **sau interval**
-- Denumire firmă (parțial)
-- Cod CAEN (exact sau parțial)
-- Județ (exact/parțial)
+    return df_data, legend_dict
 
----
+# TITLU
+st.title("🔍 Căutare situații financiare 2023")
 
-Fișierul este mare, dar aplicația folosește citire în bucăți (`chunksize`) pentru eficiență.
-""")
+# INPUT-URI
+cui = st.text_input("Caută după CUI:")
+caen = st.text_input("Caută după cod CAEN:")
 
-# === CONFIG
-CSV_URL = "https://data.gov.ro/dataset/d3caacb6-2c08-445e-94e6-8d36d00ab250/resource/b9f399d8-b641-4a23-9de7-a1dd4427b4b0/download/web_bl_bs_sl_an2024.csv"
-CHUNKSIZE = 50000
+# ÎNCĂRCARE DATE + LEGENDA
+df, legenda = incarca_date_si_legenda()
 
-# === INPUT FILTERS
-st.subheader("🎯 Criterii de filtrare")
+# Verifică că există coloanele obligatorii
+mandatory = ["CUI", "CAEN"]
+missing = [col for col in mandatory if col not in df.columns]
+if missing:
+    st.error(f"Lipsește coloana(e): {', '.join(missing)} din fișierul de date.")
+    st.write("Coloane disponibile:", df.columns.tolist())
+    st.stop()
 
-col1, col2, col3 = st.columns(3)
-with col1:
-    cui_exact = st.text_input("🔑 CUI exact")
-    cui_min = st.text_input("CUI minim (interval)")
-with col2:
-    cui_max = st.text_input("CUI maxim (interval)")
-    denumire = st.text_input("Denumire firmă (parțial)")
-with col3:
-    caen = st.text_input("Cod CAEN (exact sau parțial)")
-    judet = st.text_input("Județ (exact/parțial)")
+# FILTRARE
+rezultate = df
+if cui:
+    rezultate = rezultate[rezultate["CUI"].str.strip() == cui.strip()]
+if caen:
+    rezultate = rezultate[rezultate["CAEN"].str.strip() == caen.strip()]
 
-# === FUNCȚIE DE CĂUTARE AVANSATĂ
-def search_csv_advanced(url, cui_exact=None, cui_min=None, cui_max=None, den=None, caen_val=None, judet_val=None):
-    results = []
-
-    for chunk in pd.read_csv(url, sep=";", chunksize=CHUNKSIZE, low_memory=False):
-        cols = {col.lower().strip(): col for col in chunk.columns}
-        
-        col_cui = next((v for k, v in cols.items() if "cod fiscal" in k or "cui" in k), None)
-        col_denumire = next((v for k, v in cols.items() if "denumire" in k), None)
-        col_caen = next((v for k, v in cols.items() if "caen" in k), None)
-        col_judet = next((v for k, v in cols.items() if "judet" in k or "județ" in k), None)
-
-        if not any([col_cui, col_denumire, col_caen, col_judet]):
-            continue
-
-        # Filtrări
-        if col_cui:
-            if cui_exact:
-                chunk = chunk[chunk[col_cui].astype(str) == cui_exact.strip()]
-            else:
-                if cui_min:
-                    chunk = chunk[chunk[col_cui].astype(float) >= float(cui_min)]
-                if cui_max:
-                    chunk = chunk[chunk[col_cui].astype(float) <= float(cui_max)]
-
-        if col_denumire and den:
-            chunk = chunk[chunk[col_denumire].str.contains(den.strip(), case=False, na=False)]
-
-        if col_caen and caen_val:
-            chunk = chunk[chunk[col_caen].astype(str).str.contains(caen_val.strip(), na=False)]
-
-        if col_judet and judet_val:
-            chunk = chunk[chunk[col_judet].str.contains(judet_val.strip(), case=False, na=False)]
-
-        if not chunk.empty:
-            results.append(chunk)
-
-    return pd.concat(results) if results else pd.DataFrame()
-
-# === EXECUTARE
-if cui_exact or cui_min or cui_max or denumire or caen or judet:
-    with st.spinner("🔄 Se caută în fișier..."):
-        df = search_csv_advanced(
-            CSV_URL,
-            cui_exact=cui_exact,
-            cui_min=cui_min,
-            cui_max=cui_max,
-            den=denumire,
-            caen_val=caen,
-            judet_val=judet
-        )
-
-    if df.empty:
-        st.error("❌ Nicio înregistrare găsită.")
-    else:
-        st.success(f"✅ Găsite {len(df)} înregistrări.")
-        st.dataframe(df, use_container_width=True)
-
-        # Export CSV
-        csv_out = df.to_csv(index=False).encode("utf-8")
-        st.download_button("⬇️ Descarcă rezultatele (CSV)", csv_out, "rezultate_filtrate.csv", "text/csv")
-
+# AFIȘARE REZULTATE
+st.subheader("📄 Rezultate")
+if rezultate.empty:
+    st.warning("⚠️ Nicio înregistrare găsită.")
 else:
-    st.info("ℹ️ Introdu cel puțin un criteriu pentru a începe căutarea.")
+    st.success(f"✅ {len(rezultate)} înregistrare(gă) găsită(e).")
+    st.dataframe(rezultate, use_container_width=True)
+
+    # AFIȘARE LEGENDA
+    st.subheader("📘 Legenda coloanelor")
+    df_legenda = pd.DataFrame.from_dict(legenda, orient="index", columns=["Descriere"])
+    df_legenda.index.name = "Cod coloană"
+    st.dataframe(df_legenda, use_container_width=True)
