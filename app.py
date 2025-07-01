@@ -25,6 +25,19 @@ CHUNKSIZE = 50000
 # === INPUT FILTERS
 st.subheader("🎯 Criterii de filtrare")
 
+# === BUTON pentru afișare coloane disponibile
+st.markdown("### 🧪 Diagnostic fișier (verificare coloane)")
+if st.button("🔍 Afișează coloanele disponibile din fișier"):
+    with st.spinner("Se încarcă primele rânduri..."):
+        try:
+            test_df = pd.read_csv(CSV_URL, nrows=100)
+            st.success("✅ Fișier încărcat.")
+            st.markdown("**Coloane detectate în fișier:**")
+            st.code(", ".join(test_df.columns), language="text")
+        except Exception as e:
+            st.error(f"Eroare la încărcare: {e}")
+
+
 col1, col2, col3 = st.columns(3)
 with col1:
     cui_exact = st.text_input("🔑 CUI exact")
