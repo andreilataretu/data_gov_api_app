@@ -63,15 +63,26 @@ with col2:
     den_search = st.text_input("Denumire firmă (parțial)")
 
 def search_csv(url, cif=None, denumire=None, chunksize=CHUNKSIZE):
-    matches = []
+    results = []
+
     for chunk in pd.read_csv(url, chunksize=chunksize, low_memory=False):
-        if cif:
-            chunk = chunk[chunk['cod fiscal'].astype(str) == cif.strip()]
-        if denumire:
-            chunk = chunk[chunk['denumire'].str.contains(denumire.strip(), case=False, na=False)]
+        # Normalizează toate coloanele pentru căutare robustă
+        normalized_cols = {col.lower().strip(): col for col in chunk.columns}
+
+        # Găsește coloanele relevante (dacă există)
+        col_cif = normalized_cols.get("cod fiscal")
+        col_denumire = normalized_cols.get("denumire")
+
+        if cif and col_cif:
+            chunk = chunk[chunk[col_cif].astype(str) == cif.strip()]
+        if denumire and col_denumire:
+            chunk = chunk[chunk[col_denumire].str.contains(denumire.strip(), case=False, na=False)]
+
         if not chunk.empty:
-            matches.append(chunk)
-    return pd.concat(matches) if matches else pd.DataFrame()
+            results.append(chunk)
+
+    return pd.concat(results) if results else pd.DataFrame()
+
 
 if cif_search or den_search:
     with st.spinner("Căutare în curs..."):
