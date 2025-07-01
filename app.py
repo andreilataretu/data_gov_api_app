@@ -1,130 +1,102 @@
 import streamlit as st
 import pandas as pd
-import requests
-from collections import defaultdict
 
-st.set_page_config(page_title="Situații financiare 2024", layout="wide")
+st.set_page_config(page_title="Căutare avansată firme", layout="wide")
 
-st.title("📊 Vizualizator Situații Financiare 2024")
+st.title("🔎 Căutare avansată în Situații Financiare 2024")
 st.markdown("""
-Această aplicație te ajută să explorezi fișiere mari din datasetul [data.gov.ro/situatii_financiare_2024](https://data.gov.ro/dataset/situatii_financiare_2024), fără a le încărca integral în memorie.
+Aplicație pentru căutarea firmelor în fișierul financiar publicat pe [data.gov.ro](https://data.gov.ro/dataset/d3caacb6-2c08-445e-94e6-8d36d00ab250/resource/b9f399d8-b641-4a23-9de7-a1dd4427b4b0/download/web_bl_bs_sl_an2024.csv)
 
-### Funcționalități:
-- 🔍 Căutare eficientă după **Cod fiscal** sau **Denumire firmă**
-- 📊 Agregare după **Cod CAEN**
-- 👁️ Previzualizare rapidă a fișierelor mari
+---
+
+### ✅ Criterii disponibile:
+- Cod fiscal exact **sau interval**
+- Denumire firmă (parțial)
+- Cod CAEN (exact sau parțial)
+- Județ (selectabil)
+
+Fișierul poate avea milioane de înregistrări — aplicația folosește procesare pe bucăți pentru eficiență.
 """)
 
-# === CONFIG ===
-DATASET_ID = "situatii_financiare_2024"
-API_URL = f"https://data.gov.ro/api/3/action/package_show?id={DATASET_ID}"
-CHUNKSIZE = 50000  # Număr de rânduri citite pe bucăți
+# === CONFIG
+CSV_URL = "https://data.gov.ro/dataset/d3caacb6-2c08-445e-94e6-8d36d00ab250/resource/b9f399d8-b641-4a23-9de7-a1dd4427b4b0/download/web_bl_bs_sl_an2024.csv"
+CHUNKSIZE = 50000
 
-# === Pas 1: Preluare resurse dataset ===
-@st.cache_data(show_spinner=False)
-def get_csv_resources():
-    response = requests.get(API_URL)
-    if not response.ok:
-        return []
-    result = response.json()["result"]
-    return [res for res in result["resources"] if res["format"].lower() == "csv"]
+# === INPUT FILTERS
+st.subheader("🎯 Criterii de filtrare")
 
-csv_files = get_csv_resources()
-
-if not csv_files:
-    st.error("❌ Nu au fost găsite fișiere CSV în dataset.")
-    st.stop()
-
-# === Pas 2: Selectează fișier ===
-selected_name = st.selectbox("🗂️ Selectează fișierul CSV", [f["name"] for f in csv_files])
-selected_file = next(f for f in csv_files if f["name"] == selected_name)
-file_url = selected_file["url"]
-
-# === Pas 3: Previzualizare rapidă ===
-@st.cache_data(show_spinner=False)
-def load_preview(url, nrows=1000):
-    return pd.read_csv(url, nrows=nrows, low_memory=False)
-
-st.subheader("👁️ Previzualizare fișier (primele 1000 de rânduri)")
-with st.spinner("Se încarcă datele..."):
-    try:
-        preview_df = load_preview(file_url)
-        st.dataframe(preview_df, use_container_width=True)
-    except Exception as e:
-        st.error(f"Eroare la încărcare: {e}")
-
-# === Pas 4: Căutare firmă ===
-st.subheader("🔍 Căutare după Cod fiscal sau Denumire firmă")
-
-col1, col2 = st.columns(2)
+col1, col2, col3 = st.columns(3)
 with col1:
-    cif_search = st.text_input("Cod fiscal exact")
+    cui_exact = st.text_input("🔑 CUI exact")
+    cui_min = st.text_input("CUI minim (interval)")
 with col2:
-    den_search = st.text_input("Denumire firmă (parțial)")
+    cui_max = st.text_input("CUI maxim (interval)")
+    denumire = st.text_input("Denumire firmă (parțial)")
+with col3:
+    caen = st.text_input("Cod CAEN (exact sau parțial)")
+    judet = st.text_input("Județ (exact/parțial)")
 
-def search_csv(url, cif=None, denumire=None, chunksize=CHUNKSIZE):
+# === FUNCȚIE DE CĂUTARE AVANSATĂ
+def search_csv_advanced(url, cui_exact=None, cui_min=None, cui_max=None, den=None, caen_val=None, judet_val=None):
     results = []
 
-    for chunk in pd.read_csv(url, chunksize=chunksize, low_memory=False):
-        # Normalizează toate coloanele pentru căutare robustă
-        normalized_cols = {col.lower().strip(): col for col in chunk.columns}
+    for chunk in pd.read_csv(url, chunksize=CHUNKSIZE, low_memory=False):
+        cols = {col.lower().strip(): col for col in chunk.columns}
+        
+        col_cui = next((v for k, v in cols.items() if "cod fiscal" in k or "cui" in k), None)
+        col_denumire = next((v for k, v in cols.items() if "denumire" in k), None)
+        col_caen = next((v for k, v in cols.items() if "caen" in k), None)
+        col_judet = next((v for k, v in cols.items() if "judet" in k or "județ" in k), None)
 
-        # Găsește coloanele relevante (dacă există)
-        col_cif = normalized_cols.get("cod fiscal")
-        col_denumire = normalized_cols.get("denumire")
+        if not any([col_cui, col_denumire, col_caen, col_judet]):
+            continue
 
-        if cif and col_cif:
-            chunk = chunk[chunk[col_cif].astype(str) == cif.strip()]
-        if denumire and col_denumire:
-            chunk = chunk[chunk[col_denumire].str.contains(denumire.strip(), case=False, na=False)]
+        # Filtrări
+        if col_cui:
+            if cui_exact:
+                chunk = chunk[chunk[col_cui].astype(str) == cui_exact.strip()]
+            else:
+                if cui_min:
+                    chunk = chunk[chunk[col_cui].astype(float) >= float(cui_min)]
+                if cui_max:
+                    chunk = chunk[chunk[col_cui].astype(float) <= float(cui_max)]
+
+        if col_denumire and den:
+            chunk = chunk[chunk[col_denumire].str.contains(den.strip(), case=False, na=False)]
+
+        if col_caen and caen_val:
+            chunk = chunk[chunk[col_caen].astype(str).str.contains(caen_val.strip(), na=False)]
+
+        if col_judet and judet_val:
+            chunk = chunk[chunk[col_judet].str.contains(judet_val.strip(), case=False, na=False)]
 
         if not chunk.empty:
             results.append(chunk)
 
     return pd.concat(results) if results else pd.DataFrame()
 
+# === EXECUTARE
+if cui_exact or cui_min or cui_max or denumire or caen or judet:
+    with st.spinner("🔄 Se caută în fișier..."):
+        df = search_csv_advanced(
+            CSV_URL,
+            cui_exact=cui_exact,
+            cui_min=cui_min,
+            cui_max=cui_max,
+            den=denumire,
+            caen_val=caen,
+            judet_val=judet
+        )
 
-if cif_search or den_search:
-    with st.spinner("Căutare în curs..."):
-        results = search_csv(file_url, cif=cif_search, denumire=den_search)
-    st.success(f"{len(results)} rânduri găsite.")
-    st.dataframe(results, use_container_width=True)
+    if df.empty:
+        st.error("❌ Nicio înregistrare găsită.")
+    else:
+        st.success(f"✅ Găsite {len(df)} înregistrări.")
+        st.dataframe(df, use_container_width=True)
 
-# === Pas 5: Agregare după Cod CAEN ===
-st.subheader("📊 Agregare după Cod CAEN")
+        # Export CSV
+        csv_out = df.to_csv(index=False).encode("utf-8")
+        st.download_button("⬇️ Descarcă rezultatele (CSV)", csv_out, "rezultate_filtrate.csv", "text/csv")
 
-def aggregate_caen(url, caen_col='cod caen', afaceri_col='cifra de afaceri', chunksize=CHUNKSIZE):
-    counts = defaultdict(int)
-    sums = defaultdict(float)
-
-    for chunk in pd.read_csv(url, chunksize=chunksize, low_memory=False):
-        cols = [col.lower() for col in chunk.columns]
-        try:
-            caen_real = next(c for c in chunk.columns if c.lower() == caen_col)
-            afaceri_real = next(c for c in chunk.columns if afaceri_col in c.lower())
-        except StopIteration:
-            continue
-
-        chunk = chunk[[caen_real, afaceri_real]].dropna()
-        for row in chunk.itertuples(index=False):
-            try:
-                caen = str(row[0])
-                cifra = float(row[1])
-                counts[caen] += 1
-                sums[caen] += cifra
-            except:
-                continue
-
-    df = pd.DataFrame({
-        'Cod CAEN': list(counts.keys()),
-        'Număr firme': list(counts.values()),
-        'Sumă cifră afaceri': list(sums.values())
-    }).sort_values(by='Sumă cifră afaceri', ascending=False)
-
-    return df
-
-if st.button("🔄 Rulează agregarea"):
-    with st.spinner("Se procesează fișierul..."):
-        agg_df = aggregate_caen(file_url)
-    st.success("Agregare finalizată.")
-    st.dataframe(agg_df, use_container_width=True)
+else:
+    st.info("ℹ️ Introdu cel puțin un criteriu pentru a începe căutarea.")
